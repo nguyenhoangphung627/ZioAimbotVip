@@ -1,0 +1,367 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+
+local lockOnEnabled = false
+local nameTagEnabled = false
+local fovVisible = true 
+local fovRadius = 400 
+local priorityTargetPlayer = nil 
+local createdTags = {}
+
+local FOVCircle = Drawing.new("Circle")
+FOVCircle.Color = Color3.fromRGB(255, 0, 100)
+FOVCircle.Thickness = 2
+FOVCircle.NumSides = 64
+FOVCircle.Filled = false
+FOVCircle.Transparency = 0.6
+FOVCircle.Visible = fovVisible
+FOVCircle.Radius = fovRadius
+
+local function updateTagsVisibility()
+    for _, billboard in pairs(createdTags) do
+        if billboard then billboard.Enabled = nameTagEnabled end
+    end
+end
+
+local function createNameTag(player)
+    if player == LocalPlayer then return end
+
+    local function onCharacterAdded(character)
+        local head = character:WaitForChild("Head", 5)
+        local humanoid = character:WaitForChild("Humanoid", 5)
+        if not head or not humanoid then return end
+        if createdTags[player] then createdTags[player]:Destroy() end
+
+        local billboard = Instance.new("BillboardGui")
+        billboard.Name = "UserTag_zioiambotvip"
+        billboard.Size = UDim2.new(0, 180, 0, 45)
+        billboard.StudsOffset = Vector3.new(0, 3, 0)
+        billboard.AlwaysOnTop = true
+        billboard.Adornee = head
+
+        local textLabel = Instance.new("TextLabel")
+        textLabel.Size = UDim2.new(1, 0, 1, 0)
+        textLabel.BackgroundTransparency = 1
+        textLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+        textLabel.TextSize = 13
+        textLabel.Font = Enum.Font.SourceSansBold
+        textLabel.TextStrokeTransparency = 0.1
+        textLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+        textLabel.Parent = billboard
+
+        local function updateHealthDisplay()
+            if humanoid and humanoid.Parent then
+                local currentHp = math.round(humanoid.Health)
+                local maxHp = math.round(humanoid.MaxHealth)
+                textLabel.Text = player.Name .. " [" .. currentHp .. "/" .. maxHp .. " HP]"
+
+                if currentHp / maxHp > 0.5 then  
+                    textLabel.TextColor3 = Color3.fromRGB(0, 255, 255) 
+                else  
+                    textLabel.TextColor3 = Color3.fromRGB(255, 50, 50) 
+                end
+            end
+        end
+
+        humanoid.HealthChanged:Connect(updateHealthDisplay)
+        updateHealthDisplay()
+
+        billboard.Parent = head
+        createdTags[player] = billboard
+        billboard.Enabled = nameTagEnabled
+    end
+
+    if player.Character then onCharacterAdded(player.Character) end
+    player.CharacterAdded:Connect(onCharacterAdded)
+end
+
+for _, p in ipairs(Players:GetPlayers()) do createNameTag(p) end
+Players.PlayerAdded:Connect(createNameTag)
+Players.PlayerRemoving:Connect(function(p)
+    if createdTags[p] then
+        createdTags[p]:Destroy()
+        createdTags[p] = nil
+    end
+end)
+
+local function getClosestPlayerInFOV()
+    if not lockOnEnabled then return nil end
+
+    if priorityTargetPlayer and priorityTargetPlayer.Character and priorityTargetPlayer.Character:FindFirstChild("Head") then
+        local humanoid = priorityTargetPlayer.Character:FindFirstChildOfClass("Humanoid")
+        if humanoid and humanoid.Health > 0 then
+            return priorityTargetPlayer
+        end
+    end
+
+    local closestPlayer = nil
+    local shortestDistance = fovRadius
+    local centerScreen = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("Head") then
+            local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
+            if humanoid and humanoid.Health > 0 then
+                local head = player.Character.Head
+                local screenPos, onScreen = Camera:WorldToViewportPoint(head.Position)
+
+                if onScreen then  
+                    local distance = (Vector2.new(screenPos.X, screenPos.Y) - centerScreen).Magnitude  
+                    if distance < shortestDistance then  
+                        closestPlayer = player  
+                        shortestDistance = distance  
+                    end  
+                end
+            end
+        end
+    end
+    return closestPlayer
+end
+
+RunService.RenderStepped:Connect(function()
+    local screenSize = Camera.ViewportSize
+    FOVCircle.Position = Vector2.new(screenSize.X / 2, screenSize.Y / 2)
+    FOVCircle.Radius = fovRadius
+    FOVCircle.Visible = fovVisible
+
+    local targetPlayer = getClosestPlayerInFOV()
+    if targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChild("Head") then
+        local targetHead = targetPlayer.Character.Head
+        Camera.CFrame = CFrame.new(Camera.CFrame.Position, targetHead.Position)
+    end
+end)
+
+local success, WindUI = pcall(function()
+    return loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
+end)
+
+if success and type(WindUI) == "table" then
+    local Window = WindUI:CreateWindow({
+        Title = "Zio Hub",
+        Icon = "shield",
+        Author = "by Zio",
+        OpenButton = {
+            Title = "ZIO MENU",
+            Icon = "monitor",
+            CornerRadius = UDim.new(0, 16),
+            StrokeThickness = 2,
+            Color = ColorSequence.new(Color3.fromHex("FF0F7B"), Color3.fromHex("F89B29")),
+            OnlyMobile = false,
+            Enabled = true,
+            Draggable = true,
+        }
+    })
+
+    local CombatTab = Window:Tab({ Title = "Combat", Icon = "crosshair" })
+    local VisualsTab = Window:Tab({ Title = "Visual", Icon = "eye" })
+
+    CombatTab:Toggle({
+        Title = "Aimbot",
+        Desc = "AimHead",
+        Value = false,
+        Callback = function(state) lockOnEnabled = state end
+    })
+
+    local TargetStatusParagraph = CombatTab:Button({
+        Title = "Mục tiêu cần ghim",
+        Desc = "Nhập ID hoặc Tên Player",
+        Callback = function() end
+    })
+
+    CombatTab:Input({
+        Title = "Id player",
+        Placeholder = "Súc vật cần xử",
+        Callback = function(inputText)
+            if inputText == "" then
+                priorityTargetPlayer = nil
+                TargetStatusParagraph:SetTitle("Mục tiêu đặc biệt cần xử: Trống")
+                return
+            end
+            local found = nil
+            for _, p in ipairs(Players:GetPlayers()) do
+                if tonumber(inputText) and p.UserId == tonumber(inputText) or p.Name:lower() == inputText:lower() then
+                    found = p break
+                end
+            end
+            if found and found ~= LocalPlayer then
+                priorityTargetPlayer = found
+                TargetStatusParagraph:SetTitle("⭐ Ưu tiên: " .. found.Name)
+            else
+                priorityTargetPlayer = nil
+                TargetStatusParagraph:SetTitle("Nó trốn rồi :!")
+            end
+        end
+    })
+
+
+    VisualsTab:Toggle({
+        Title = "ESP",
+        Desc = "Hiển thị vị trí",
+        Value = false,
+        Callback = function(state) nameTagEnabled = state updateTagsVisibility() end
+    })
+
+    VisualsTab:Toggle({
+        Title = "Phạm Vi Quét",
+        Desc = "Phạm vi xung quanh: 500",
+        Value = true,
+        Callback = function(state) fovVisible = state FOVCircle.Visible = fovVisible end
+    })
+
+    VisualsTab:Slider({
+        Title = "Kích Thước Phạm Vi Quét",
+        Desc = "Điều chỉnh kích cỡ vòng giới hạn quét mục tiêu",
+        Min = 50, Max = 500, Value = 400,
+        Callback = function(value) fovRadius = value FOVCircle.Radius = fovRadius end
+    })
+
+    CombatTab:Select()
+else
+    local ScreenGui = Instance.new("ScreenGui")
+    ScreenGui.Name = "zioiambotvip_fallback"
+    ScreenGui.ResetOnSpawn = false
+    ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+    local MainMenu = Instance.new("Frame")
+    MainMenu.Size = UDim2.new(0, 240, 0, 310)
+    MainMenu.Position = UDim2.new(0.05, 0, 0.25, 0)
+    MainMenu.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+    MainMenu.BorderSizePixel = 2
+    MainMenu.BorderColor3 = Color3.fromRGB(255, 0, 100)
+    MainMenu.Active = true
+    MainMenu.Draggable = true
+    MainMenu.Parent = ScreenGui
+
+    local Title = Instance.new("TextLabel")
+    Title.Size = UDim2.new(1, 0, 0, 40)
+    Title.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+    Title.Text = "⭐ ZIO SYSTEM (FALLBACK MODE)"
+    Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+    Title.Font = Enum.Font.SourceSansBold
+    Title.TextSize = 14
+    Title.Parent = MainMenu
+
+    local LockButton = Instance.new("TextButton")
+    LockButton.Size = UDim2.new(1, -20, 0, 35)
+    LockButton.Position = UDim2.new(0, 10, 0, 50)
+    LockButton.Font = Enum.Font.SourceSansBold
+    LockButton.TextSize = 13
+    LockButton.Parent = MainMenu
+
+    local TagButton = Instance.new("TextButton")
+    TagButton.Size = UDim2.new(1, -20, 0, 35)
+    TagButton.Position = UDim2.new(0, 10, 0, 95)
+    TagButton.Font = Enum.Font.SourceSansBold
+    TagButton.TextSize = 13
+    TagButton.Parent = MainMenu
+
+    local FovToggleButton = Instance.new("TextButton")
+    FovToggleButton.Size = UDim2.new(1, -20, 0, 35)
+    FovToggleButton.Position = UDim2.new(0, 10, 0, 140)
+    FovToggleButton.Font = Enum.Font.SourceSansBold
+    FovToggleButton.TextSize = 13
+    FovToggleButton.Parent = MainMenu
+
+    local FovLabel = Instance.new("TextLabel")
+    FovLabel.Size = UDim2.new(1, -110, 0, 30)
+    FovLabel.Position = UDim2.new(0, 10, 0, 185)
+    FovLabel.BackgroundTransparency = 1
+    FovLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+    FovLabel.Font = Enum.Font.SourceSansBold
+    FovLabel.TextSize = 13
+    FovLabel.TextXAlignment = Enum.TextXAlignment.Left
+    FovLabel.Parent = MainMenu
+
+    local BtnMinus = Instance.new("TextButton")
+    BtnMinus.Size = UDim2.new(0, 40, 0, 30)
+    BtnMinus.Position = UDim2.new(1, -95, 0, 185)
+    BtnMinus.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+    BtnMinus.Text = "-"
+    BtnMinus.TextColor3 = Color3.fromRGB(255, 255, 255)
+    BtnMinus.Parent = MainMenu
+
+    local BtnPlus = Instance.new("TextButton")
+    BtnPlus.Size = UDim2.new(0, 40, 0, 30)
+    BtnPlus.Position = UDim2.new(1, -50, 0, 185)
+    BtnPlus.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+    BtnPlus.Text = "+"
+    BtnPlus.TextColor3 = Color3.fromRGB(255, 255, 255)
+    BtnPlus.Parent = MainMenu
+
+    local IdTextBox = Instance.new("TextBox")
+    IdTextBox.Size = UDim2.new(1, -20, 0, 35)
+    IdTextBox.Position = UDim2.new(0, 10, 0, 225)
+    IdTextBox.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    IdTextBox.PlaceholderText = "Nhập UserId / Name rồi Enter..."
+    IdTextBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+    IdTextBox.Text = ""
+    IdTextBox.Parent = MainMenu
+
+    local StatusLabel = Instance.new("TextLabel")
+    StatusLabel.Size = UDim2.new(1, -20, 0, 25)
+    StatusLabel.Position = UDim2.new(0, 10, 0, 270)
+    StatusLabel.BackgroundTransparency = 1
+    StatusLabel.Text = "Mục tiêu ưu tiên: Trống"
+    StatusLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
+    StatusLabel.Font = Enum.Font.SourceSansItalic
+    StatusLabel.TextSize = 12
+    StatusLabel.Parent = MainMenu
+
+    local function updateCoreUI()
+        if lockOnEnabled then
+            LockButton.Text = "KHÓA CAMERA: BẬT"
+            LockButton.BackgroundColor3 = Color3.fromRGB(0, 150, 70)
+        else
+            LockButton.Text = "KHÓA CAMERA: TẮT"
+            LockButton.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+        end
+
+        if nameTagEnabled then
+            TagButton.Text = "ESP THẺ TÊN: BẬT"
+            TagButton.BackgroundColor3 = Color3.fromRGB(0, 150, 70)
+        else
+            TagButton.Text = "ESP THẺ TÊN: TẮT"
+            TagButton.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+        end
+
+        if fovVisible then
+            FovToggleButton.Text = "PHẠM VI QUÉT: HIỆN"
+            FovToggleButton.BackgroundColor3 = Color3.fromRGB(255, 0, 100)
+        else
+            FovToggleButton.Text = "PHẠM VI QUÉT: ẨN"
+            FovToggleButton.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+        end
+        FovLabel.Text = "PHẠM VI: " .. fovRadius .. "px"
+    end
+
+    LockButton.MouseButton1Click:Connect(function() lockOnEnabled = not lockOnEnabled updateCoreUI() end)
+    TagButton.MouseButton1Click:Connect(function() nameTagEnabled = not nameTagEnabled updateCoreUI() updateTagsVisibility() end)
+    FovToggleButton.MouseButton1Click:Connect(function() fovVisible = not fovVisible updateCoreUI() end)
+    
+    BtnPlus.MouseButton1Click:Connect(function() fovRadius = math.clamp(fovRadius + 25, 50, 500) updateCoreUI() end)
+    BtnMinus.MouseButton1Click:Connect(function() fovRadius = math.clamp(fovRadius - 25, 50, 500) updateCoreUI() end)
+
+    IdTextBox.FocusLost:Connect(function()
+        local inputText = IdTextBox.Text
+        if inputText == "" then priorityTargetPlayer = nil StatusLabel.Text = "Mục tiêu ưu tiên: Trống" return end
+        local found = nil
+        for _, p in ipairs(Players:GetPlayers()) do
+            if tonumber(inputText) and p.UserId == tonumber(inputText) or p.Name:lower() == inputText:lower() then
+                found = p break
+            end
+        end
+        if found and found ~= LocalPlayer then
+            priorityTargetPlayer = found
+            StatusLabel.Text = "⭐ Ưu tiên ID: " .. found.Name
+        else
+            priorityTargetPlayer = nil
+            StatusLabel.Text = "❌ Không tìm thấy người chơi!"
+        end
+    end)
+
+    updateCoreUI()
+end
+
+updateTagsVisibility()
